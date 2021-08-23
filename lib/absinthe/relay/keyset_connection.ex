@@ -310,35 +310,35 @@ defmodule Absinthe.Relay.KeysetConnection do
   end
   ```
   """
-  @spec from_list(data :: list, args :: Options.t()) :: {:ok, t} | {:error, any}
-  def from_list(data, args, opts \\ []) do
-    with {:ok, direction, limit} <- limit(args, opts[:max]),
-         {:ok, offset} <- offset(args) do
-      count = length(data)
-
-      {offset, limit} =
-        case direction do
-          :forward ->
-            {offset || 0, limit}
-
-          :backward ->
-            end_offset = offset || count
-            start_offset = max(end_offset - limit, 0)
-            limit = if start_offset == 0, do: end_offset, else: limit
-            {start_offset, limit}
-        end
-
-      opts =
-        opts
-        |> Keyword.put(:has_previous_page, offset > 0)
-        |> Keyword.put(:has_next_page, count > offset + limit)
-
-      data
-      |> Enum.slice(offset, limit)
-      |> from_slice(offset, opts)
-    end
-  end
-
+  # @spec from_list(data :: list, args :: Options.t()) :: {:ok, t} | {:error, any}
+  # def from_list(data, args, opts \\ []) do
+  #   with {:ok, direction, limit} <- limit(args, opts[:max]),
+  #        {:ok, offset} <- offset(args) do
+  #     count = length(data)
+  #
+  #     {offset, limit} =
+  #       case direction do
+  #         :forward ->
+  #           {offset || 0, limit}
+  #
+  #         :backward ->
+  #           end_offset = offset || count
+  #           start_offset = max(end_offset - limit, 0)
+  #           limit = if start_offset == 0, do: end_offset, else: limit
+  #           {start_offset, limit}
+  #       end
+  #
+  #     opts =
+  #       opts
+  #       |> Keyword.put(:has_previous_page, offset > 0)
+  #       |> Keyword.put(:has_next_page, count > offset + limit)
+  #
+  #     data
+  #     |> Enum.slice(offset, limit)
+  #     |> from_slice(offset, opts)
+  #   end
+  # end
+  #
   @type from_slice_opts :: [
           has_previous_page: boolean,
           has_next_page: boolean
@@ -390,6 +390,7 @@ defmodule Absinthe.Relay.KeysetConnection do
     {:ok, %{edges: edges, page_info: page_info}}
   end
 
+  #
   @doc """
   Build a connection from an Ecto Query
 
@@ -426,31 +427,46 @@ defmodule Absinthe.Relay.KeysetConnection do
           | from_slice_opts
 
   if Code.ensure_loaded?(Ecto) do
-    @spec from_query(Ecto.Queryable.t(), (Ecto.Queryable.t() -> [term]), Options.t()) ::
-            {:ok, map} | {:error, any}
-    @spec from_query(
-            Ecto.Queryable.t(),
-            (Ecto.Queryable.t() -> [term]),
-            Options.t(),
-            from_query_opts
-          ) :: {:ok, map} | {:error, any}
+    # @spec from_query(Ecto.Queryable.t(), (Ecto.Queryable.t() -> [term]), Options.t()) ::
+    #         {:ok, map} | {:error, any}
+    # @spec from_query(
+    #         Ecto.Queryable.t(),
+    #         (Ecto.Queryable.t() -> [term]),
+    #         Options.t(),
+    #         from_query_opts
+    #       ) :: {:ok, map} | {:error, any}
     def from_query(query, repo_fun, args, opts \\ []) do
       require Ecto.Query
 
-      with {:ok, offset, limit} <- offset_and_limit_for_query(args, opts) do
-        records =
-          query
-          |> Ecto.Query.limit(^(limit + 1))
-          |> Ecto.Query.offset(^offset)
-          |> repo_fun.()
+      query =
+        case keyset_params_from(args, opts) do
+          {:ok, {column, :>, val, limit}} ->
+            query
+            |> Ecto.Query.where([q], field(q, ^column) > ^val)
+            |> Ecto.Query.limit(^limit)
 
-        opts =
-          opts
-          |> Keyword.put(:has_previous_page, offset > 0)
-          |> Keyword.put(:has_next_page, length(records) > limit)
+          {:ok, {column, :<, val, limit}} ->
+            query
+            |> Ecto.Query.where([q], field(q, ^column) < ^val)
+            |> Ecto.Query.limit(^limit)
 
-        from_slice(Enum.take(records, limit), offset, opts)
-      end
+          _ ->
+            raise "oh noes"
+        end
+
+      # with {:ok, offset, limit} <- offset_and_limit_for_query(args, opts) do
+      #   records =
+      #     query
+      #     |> Ecto.Query.limit(^(limit + 1))
+      #     |> Ecto.Query.offset(^offset)
+      #     |> repo_fun.()
+      #
+      #   opts =
+      #     opts
+      #     |> Keyword.put(:has_previous_page, offset > 0)
+      #     |> Keyword.put(:has_next_page, length(records) > limit)
+      #
+      #   from_slice(Enum.take(records, limit), offset, opts)
     end
   else
     def from_query(_, _, _, _, _ \\ []) do
@@ -462,150 +478,225 @@ defmodule Absinthe.Relay.KeysetConnection do
     end
   end
 
-  @doc false
-  @spec offset_and_limit_for_query(Options.t(), from_query_opts) ::
-          {:ok, offset, limit} | {:error, any}
-  def offset_and_limit_for_query(args, opts) do
-    with {:ok, direction, limit} <- limit(args, opts[:max]),
-         {:ok, offset} <- offset(args) do
-      case direction do
-        :forward ->
-          {:ok, offset || 0, limit}
+  # after: 100, first: 10 = id > 100 ORDER BY id ASC LIMIT 10
+  # after: 100, last: 10 = id > 100 ORDER BY id DESC LIMIT 10 # then reverse order
+  # before: 100, last: 10 = id < 100 ORDER BY id DESC LIMIT 10 # then reverse order
+  # before: 100, first: 10 = id < 100 ORDER BY id ASC LIMIT 10
 
-        :backward ->
-          case {offset, opts[:count]} do
-            {nil, nil} ->
-              {:error,
-               "You must supply a count (total number of records) option if using `last` without `before`"}
+  # if after is set, do a > query, if before ise set, do a < query
 
-            {nil, value} ->
-              {:ok, max(value - limit, 0), limit}
+  # ["YO DAWG", %{before: "YXJyYXljb25uZWN0aW9uOjA=", first: 2}, []]
+  #
+  def keyset_params_from(args) do
+    keyset_params_from(args, [])
+  end
 
-            {value, _} ->
-              start_offset = max(value - limit, 0)
-              limit = if start_offset == 0, do: value, else: limit
-              {:ok, start_offset, limit}
-          end
-      end
+  def keyset_params_from(%{first: _, last: _}, _opts) do
+    raise ArgumentError, "cannot provide both :first and :last options"
+  end
+
+  def keyset_params_from(%{first: n}, _opts) when is_integer(n) and n < 0 do
+    raise ArgumentError, "value of :first must be >= 0"
+  end
+
+  def keyset_params_from(%{first: n} = args, opts) when is_integer(n) do
+    keyset_column = Keyword.get(opts, :keyset_column, :id)
+    display_order = Keyword.get(opts, :display_order, :asc)
+
+    with {:ok, filters} <- get_filters(args) do
+      {:ok, {keyset_column, filters, {:asc, display_order}, n}}
     end
   end
 
-  @doc """
-  Same as `limit/1` with user provided upper bound.
+  def keyset_params_from(%{last: n}, _opts) when is_integer(n) and n < 0 do
+    {:error, "value of :last must be >= 0"}
+  end
 
-  Often backend developers want to provide a maximum value above which no more
-  records can be retrieved, no matter how many are asked for by the front end.
+  def keyset_params_from(%{last: n} = args, opts) when is_integer(n) do
+    keyset_column = Keyword.get(opts, :keyset_column, :id)
+    display_order = Keyword.get(opts, :display_order, :asc)
 
-  This function provides that capability. For use with `from_list` or
-  `from_query` use the `:max` option on those functions.
-  """
-  @spec limit(args :: Options.t(), max :: pos_integer | nil) ::
-          {:ok, pagination_direction, limit} | {:error, any}
-  def limit(args, nil), do: limit(args)
-
-  def limit(args, max) do
-    with {:ok, direction, limit} <- limit(args) do
-      {:ok, direction, min(max, limit)}
+    with {:ok, filters} <- get_filters(args) do
+      {:ok, {keyset_column, filters, {:desc, display_order}, n}}
     end
   end
 
-  @doc """
-  The direction and desired number of records in the pagination arguments.
-  """
-  @spec limit(args :: Options.t()) :: {:ok, pagination_direction, limit} | {:error, any}
-  def limit(%{first: first}) when not is_nil(first), do: {:ok, :forward, first}
-  def limit(%{last: last}) when not is_nil(last), do: {:ok, :backward, last}
-  def limit(_), do: {:error, "You must either supply `:first` or `:last`"}
+  def keyset_params_from(%{first: _, last: _} = args, opts) do
+    keyset_column = Keyword.get(opts, :keyset_column, :id)
+    IO.inspect(["YO DAWG", args, opts])
+    nil
+  end
 
-  @doc """
-  Returns the offset for a page.
+  defp get_filters(args) do
+    filters =
+      Enum.reduce(args, %{filters: [], errors: []}, fn arg, %{filters: filters, errors: errors} ->
+        case arg do
+          # handle valid filters
+          {:after, n} -> %{filters: [{:>, n} | filters], errors: errors}
+          {:before, n} -> %{filters: [{:<, n} | filters], errors: errors}
+          # ignore valid limits
+          {:first, n} -> %{filters: filters, errors: errors}
+          {:last, n} -> %{filters: filters, errors: errors}
+          # mark anything else as an error
+          other -> %{filters: filters, errors: [other | errors]}
+        end
+      end)
 
-  The limit is required because if using backwards pagination the limit will be
-  subtracted from the offset.
+    case filters do
+      %{filters: filters, errors: []} ->
+        {:ok, filters}
 
-  If no offset is specified in the pagination arguments, this will return `nil`.
-  """
-  @spec offset(args :: Options.t()) :: {:ok, offset | nil} | {:error, any}
-  def offset(%{after: cursor}) when not is_nil(cursor) do
-    with {:ok, offset} <- cursor_to_offset(cursor) do
-      {:ok, offset + 1}
-    else
-      {:error, _} ->
-        {:error, "Invalid cursor provided as `after` argument"}
+      %{errors: errors} ->
+        {:error, {:invalid_filters, errors}}
     end
   end
 
-  def offset(%{before: cursor}) when not is_nil(cursor) do
-    with {:ok, offset} <- cursor_to_offset(cursor) do
-      {:ok, max(offset, 0)}
-    else
-      {:error, _} ->
-        {:error, "Invalid cursor provided as `before` argument"}
-    end
-  end
-
-  def offset(_), do: {:ok, nil}
-
-  defp build_cursors([], _offset), do: {[], nil, nil}
-
-  defp build_cursors([item | items], offset) do
-    offset = offset || 0
-    first = offset_to_cursor(offset)
-    edge = build_edge(item, first)
-    {edges, _} = do_build_cursors(items, offset + 1, [edge], first)
-    first = edges |> List.first() |> get_in([:cursor])
-    last = edges |> List.last() |> get_in([:cursor])
-    {edges, first, last}
-  end
-
-  defp do_build_cursors([], _, edges, last), do: {Enum.reverse(edges), last}
-
-  defp do_build_cursors([item | rest], i, edges, _last) do
-    cursor = offset_to_cursor(i)
-    edge = build_edge(item, cursor)
-    do_build_cursors(rest, i + 1, [edge | edges], cursor)
-  end
-
-  defp build_edge({item, args}, cursor) do
-    args
-    |> Enum.flat_map(fn
-      {key, _} when key in [:node] ->
-        Logger.warn("Ignoring additional #{key} provided on edge (overriding is not allowed)")
-        []
-
-      {key, val} ->
-        [{key, val}]
-    end)
-    |> Enum.into(build_edge(item, cursor))
-  end
-
-  defp build_edge(item, cursor) do
-    %{
-      node: item,
-      cursor: cursor
-    }
-  end
-
-  @doc """
-  Creates the cursor string from an offset.
-  """
-  @spec offset_to_cursor(integer) :: binary
-  def offset_to_cursor(offset) do
-    [@cursor_prefix, to_string(offset)]
-    |> IO.iodata_to_binary()
-    |> Base.encode64()
-  end
-
-  @doc """
-  Rederives the offset from the cursor string.
-  """
-  @spec cursor_to_offset(binary) :: {:ok, integer} | {:error, any}
-  def cursor_to_offset(cursor) do
-    with {:ok, @cursor_prefix <> raw} <- Base.decode64(cursor),
-         {parsed, _} <- Integer.parse(raw) do
-      {:ok, parsed}
-    else
-      _ -> {:error, "Invalid cursor"}
-    end
-  end
+  #
+  # @doc false
+  # @spec offset_and_limit_for_query(Options.t(), from_query_opts) ::
+  #         {:ok, offset, limit} | {:error, any}
+  # def offset_and_limit_for_query(args, opts) do
+  #   with {:ok, direction, limit} <- limit(args, opts[:max]),
+  #        {:ok, offset} <- offset(args) do
+  #     case direction do
+  #       :forward ->
+  #         {:ok, offset || 0, limit}
+  #
+  #       :backward ->
+  #         case {offset, opts[:count]} do
+  #           {nil, nil} ->
+  #             {:error,
+  #              "You must supply a count (total number of records) option if using `last` without `before`"}
+  #
+  #           {nil, value} ->
+  #             {:ok, max(value - limit, 0), limit}
+  #
+  #           {value, _} ->
+  #             start_offset = max(value - limit, 0)
+  #             limit = if start_offset == 0, do: value, else: limit
+  #             {:ok, start_offset, limit}
+  #         end
+  #     end
+  #   end
+  # end
+  #
+  # @doc """
+  # Same as `limit/1` with user provided upper bound.
+  #
+  # Often backend developers want to provide a maximum value above which no more
+  # records can be retrieved, no matter how many are asked for by the front end.
+  #
+  # This function provides that capability. For use with `from_list` or
+  # `from_query` use the `:max` option on those functions.
+  # """
+  # @spec limit(args :: Options.t(), max :: pos_integer | nil) ::
+  #         {:ok, pagination_direction, limit} | {:error, any}
+  # def limit(args, nil), do: limit(args)
+  #
+  # def limit(args, max) do
+  #   with {:ok, direction, limit} <- limit(args) do
+  #     {:ok, direction, min(max, limit)}
+  #   end
+  # end
+  #
+  # @doc """
+  # The direction and desired number of records in the pagination arguments.
+  # """
+  # @spec limit(args :: Options.t()) :: {:ok, pagination_direction, limit} | {:error, any}
+  # def limit(%{first: first}) when not is_nil(first), do: {:ok, :forward, first}
+  # def limit(%{last: last}) when not is_nil(last), do: {:ok, :backward, last}
+  # def limit(_), do: {:error, "You must either supply `:first` or `:last`"}
+  #
+  # @doc """
+  # Returns the offset for a page.
+  #
+  # The limit is required because if using backwards pagination the limit will be
+  # subtracted from the offset.
+  #
+  # If no offset is specified in the pagination arguments, this will return `nil`.
+  # """
+  # @spec offset(args :: Options.t()) :: {:ok, offset | nil} | {:error, any}
+  # def offset(%{after: cursor}) when not is_nil(cursor) do
+  #   with {:ok, offset} <- cursor_to_offset(cursor) do
+  #     {:ok, offset + 1}
+  #   else
+  #     {:error, _} ->
+  #       {:error, "Invalid cursor provided as `after` argument"}
+  #   end
+  # end
+  #
+  # def offset(%{before: cursor}) when not is_nil(cursor) do
+  #   with {:ok, offset} <- cursor_to_offset(cursor) do
+  #     {:ok, max(offset, 0)}
+  #   else
+  #     {:error, _} ->
+  #       {:error, "Invalid cursor provided as `before` argument"}
+  #   end
+  # end
+  #
+  # def offset(_), do: {:ok, nil}
+  #
+  defp build_cursors(_, _), do: {[], nil, nil}
+  # defp build_cursors([], _offset), do: {[], nil, nil}
+  #
+  # defp build_cursors([item | items], offset) do
+  #   offset = offset || 0
+  #   first = offset_to_cursor(offset)
+  #   edge = build_edge(item, first)
+  #   {edges, _} = do_build_cursors(items, offset + 1, [edge], first)
+  #   first = edges |> List.first() |> get_in([:cursor])
+  #   last = edges |> List.last() |> get_in([:cursor])
+  #   {edges, first, last}
+  # end
+  #
+  # defp do_build_cursors([], _, edges, last), do: {Enum.reverse(edges), last}
+  #
+  # defp do_build_cursors([item | rest], i, edges, _last) do
+  #   cursor = offset_to_cursor(i)
+  #   edge = build_edge(item, cursor)
+  #   do_build_cursors(rest, i + 1, [edge | edges], cursor)
+  # end
+  #
+  # defp build_edge({item, args}, cursor) do
+  #   args
+  #   |> Enum.flat_map(fn
+  #     {key, _} when key in [:node] ->
+  #       Logger.warn("Ignoring additional #{key} provided on edge (overriding is not allowed)")
+  #       []
+  #
+  #     {key, val} ->
+  #       [{key, val}]
+  #   end)
+  #   |> Enum.into(build_edge(item, cursor))
+  # end
+  #
+  # defp build_edge(item, cursor) do
+  #   %{
+  #     node: item,
+  #     cursor: cursor
+  #   }
+  # end
+  #
+  # @doc """
+  # Creates the cursor string from an offset.
+  # """
+  # @spec offset_to_cursor(integer) :: binary
+  # def offset_to_cursor(offset) do
+  #   [@cursor_prefix, to_string(offset)]
+  #   |> IO.iodata_to_binary()
+  #   |> Base.encode64()
+  # end
+  #
+  # @doc """
+  # Rederives the offset from the cursor string.
+  # """
+  # @spec cursor_to_offset(binary) :: {:ok, integer} | {:error, any}
+  # def cursor_to_offset(cursor) do
+  #   with {:ok, @cursor_prefix <> raw} <- Base.decode64(cursor),
+  #        {parsed, _} <- Integer.parse(raw) do
+  #     {:ok, parsed}
+  #   else
+  #     _ -> {:error, "Invalid cursor"}
+  #   end
+  # end
 end
