@@ -501,10 +501,10 @@ defmodule Absinthe.Relay.KeysetConnection do
 
   def keyset_params_from(%{first: n} = args, opts) when is_integer(n) do
     keyset_column = Keyword.get(opts, :keyset_column, :id)
-    display_order = Keyword.get(opts, :display_order, :asc)
+    pagination_dir = Keyword.get(opts, :pagination_dir, :asc)
 
-    with {:ok, filters} <- get_filters(args) do
-      {:ok, {keyset_column, filters, {:asc, display_order}, n}}
+    with {:ok, filters} <- get_filters(args, pagination_dir) do
+      {:ok, {keyset_column, filters, {:asc, pagination_dir}, n}}
     end
   end
 
@@ -514,10 +514,10 @@ defmodule Absinthe.Relay.KeysetConnection do
 
   def keyset_params_from(%{last: n} = args, opts) when is_integer(n) do
     keyset_column = Keyword.get(opts, :keyset_column, :id)
-    display_order = Keyword.get(opts, :display_order, :asc)
+    pagination_dir = Keyword.get(opts, :pagination_dir, :asc)
 
-    with {:ok, filters} <- get_filters(args) do
-      {:ok, {keyset_column, filters, {:desc, display_order}, n}}
+    with {:ok, filters} <- get_filters(args, pagination_dir) do
+      {:ok, {keyset_column, filters, {:desc, pagination_dir}, n}}
     end
   end
 
@@ -527,7 +527,7 @@ defmodule Absinthe.Relay.KeysetConnection do
     nil
   end
 
-  defp get_filters(args) do
+  defp get_filters(args, pagination_dir) do
     filters =
       Enum.reduce(args, %{filters: [], errors: []}, fn arg, %{filters: filters, errors: errors} ->
         case arg do

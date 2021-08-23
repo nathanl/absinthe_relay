@@ -1,0 +1,24 @@
+Display dir asc
+  after x
+    WHERE id > x ORDER BY x ASC
+    first y
+      WHERE id > x ORDER BY x ASC LIMIT y
+  before x
+    WHERE id < x ORDER BY x ASC
+    last y
+      WHERE id < x ORDER BY x DESC LIMIT y -- reverse
+
+Display dir desc
+  after x
+    WHERE id < x ORDER BY x DESC
+    first y
+      WHERE id < x ORDER BY x DESC LIMIT y
+  before x
+    WHERE id > x ORDER BY x DESC
+    last y
+      WHERE id > x ORDER BY x ASC LIMIT y -- reverse
+  
+
+- after + first or before + last makes sense because I can take the opaque cursor from my first/last edge and change `before/after` to that to get the next page
+- after + before doesn't make sense for paginating
+- first + last is contradictory unless the result set is small, doesn't make much sense

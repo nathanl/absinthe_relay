@@ -31,6 +31,16 @@ defmodule Absinthe.Relay.KeysetConnectionTest do
         assert p == {:ok, {:id, [{:>, 100}], {:asc, :asc}, 10}}
       end
 
+      test ":after + :first + :keyset_column" do
+        p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [keyset_column: :seq])
+        assert p == {:ok, {:seq, [{:>, 100}], {:asc, :asc}, 10}}
+      end
+
+      test ":after + :first + :pagination_dir" do
+        p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [pagination_dir: :desc])
+        assert p == {:ok, {:id, [{:>, 100}], {:desc, :desc}, 10}}
+      end
+
       test ":before + :last" do
         p = KeysetConnection.keyset_params_from(%{before: 100, last: 10})
         assert p == {:ok, {:id, [{:<, 100}], {:desc, :asc}, 10}}
