@@ -18,10 +18,25 @@ defmodule Absinthe.Relay.KeysetConnectionTest do
     end
 
 
-  # after: 100, first: 10 = id > 100 ORDER BY id ASC LIMIT 10
-  # after: 100, last: 10 = id > 100 ORDER BY id DESC LIMIT 10 # then reverse order
-  # before: 100, last: 10 = id < 100 ORDER BY id DESC LIMIT 10 # then reverse order
-  # before: 100, first: 10 = id < 100 ORDER BY id ASC LIMIT 10
+# Display dir asc
+#   after x
+#     WHERE id > x ORDER BY x ASC
+#     first y
+#       WHERE id > x ORDER BY x ASC LIMIT y
+#   before x
+#     WHERE id < x ORDER BY x ASC
+#     last y
+#       WHERE id < x ORDER BY x DESC LIMIT y -- reverse
+#
+# Display dir desc
+#   after x
+#     WHERE id < x ORDER BY x DESC
+#     first y
+#       WHERE id < x ORDER BY x DESC LIMIT y
+#   before x
+#     WHERE id > x ORDER BY x DESC
+#     last y
+#       WHERE id > x ORDER BY x ASC LIMIT y -- reverse
 
     # options: :keyset_column, :visible_sort
 
@@ -31,20 +46,26 @@ defmodule Absinthe.Relay.KeysetConnectionTest do
         assert p == {:ok, {:id, [{:>, 100}], {:asc, :asc}, 10}}
       end
 
-      test ":after + :first + :keyset_column" do
-        p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [keyset_column: :seq])
-        assert p == {:ok, {:seq, [{:>, 100}], {:asc, :asc}, 10}}
-      end
+      # test ":after" do
+      #   p = KeysetConnection.keyset_params_from(%{after: 100})
+      #   assert p == {:ok, {:id, [{:>, 100}], {:asc, :asc}, nil}}
+      # end
 
-      test ":after + :first + :pagination_dir" do
-        p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [pagination_dir: :desc])
-        assert p == {:ok, {:id, [{:>, 100}], {:desc, :desc}, 10}}
-      end
-
-      test ":before + :last" do
-        p = KeysetConnection.keyset_params_from(%{before: 100, last: 10})
-        assert p == {:ok, {:id, [{:<, 100}], {:desc, :asc}, 10}}
-      end
+      #
+      # test ":after + :first + :keyset_column" do
+      #   p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [keyset_column: :seq])
+      #   assert p == {:ok, {:seq, [{:>, 100}], {:asc, :asc}, 10}}
+      # end
+      #
+      # test ":after + :first + :pagination_dir" do
+      #   p = KeysetConnection.keyset_params_from(%{after: 100, first: 10}, [pagination_dir: :desc])
+      #   assert p == {:ok, {:id, [{:>, 100}], {:desc, :desc}, 10}}
+      # end
+      #
+      # test ":before + :last" do
+      #   p = KeysetConnection.keyset_params_from(%{before: 100, last: 10})
+      #   assert p == {:ok, {:id, [{:<, 100}], {:desc, :asc}, 10}}
+      # end
     end
 
     # @jack_global_id Base.encode64("Person:jack")

@@ -492,64 +492,107 @@ defmodule Absinthe.Relay.KeysetConnection do
   end
 
   def keyset_params_from(%{first: _, last: _}, _opts) do
-    raise ArgumentError, "cannot provide both :first and :last options"
+    {:error, "cannot provide both :first and :last options"}
+  end
+  def keyset_params_from(%{before: _, after: _}, _opts) do
+    {:error, "cannot provide both :before and :after options"}
   end
 
   def keyset_params_from(%{first: n}, _opts) when is_integer(n) and n < 0 do
-    raise ArgumentError, "value of :first must be >= 0"
-  end
-
-  def keyset_params_from(%{first: n} = args, opts) when is_integer(n) do
-    keyset_column = Keyword.get(opts, :keyset_column, :id)
-    pagination_dir = Keyword.get(opts, :pagination_dir, :asc)
-
-    with {:ok, filters} <- get_filters(args, pagination_dir) do
-      {:ok, {keyset_column, filters, {:asc, pagination_dir}, n}}
-    end
+    {:error, "value of :first must be >= 0"}
   end
 
   def keyset_params_from(%{last: n}, _opts) when is_integer(n) and n < 0 do
     {:error, "value of :last must be >= 0"}
   end
 
-  def keyset_params_from(%{last: n} = args, opts) when is_integer(n) do
-    keyset_column = Keyword.get(opts, :keyset_column, :id)
-    pagination_dir = Keyword.get(opts, :pagination_dir, :asc)
 
-    with {:ok, filters} <- get_filters(args, pagination_dir) do
-      {:ok, {keyset_column, filters, {:desc, pagination_dir}, n}}
+  def keyset_params_from(%{after: c, first: n}, opts) when is_integer(n) do
+    with {:ok, {keyset_column, display_dir}} <- parse_opts(opts),
+         {:ok, filters} <- get_filters([after: c], display_dir) do
+      {:ok, {keyset_column, filters, {sort, display_dir}, n}}
     end
   end
 
-  def keyset_params_from(%{first: _, last: _} = args, opts) do
-    keyset_column = Keyword.get(opts, :keyset_column, :id)
-    IO.inspect(["YO DAWG", args, opts])
-    nil
-  end
 
-  defp get_filters(args, pagination_dir) do
-    filters =
-      Enum.reduce(args, %{filters: [], errors: []}, fn arg, %{filters: filters, errors: errors} ->
-        case arg do
-          # handle valid filters
-          {:after, n} -> %{filters: [{:>, n} | filters], errors: errors}
-          {:before, n} -> %{filters: [{:<, n} | filters], errors: errors}
-          # ignore valid limits
-          {:first, n} -> %{filters: filters, errors: errors}
-          {:last, n} -> %{filters: filters, errors: errors}
-          # mark anything else as an error
-          other -> %{filters: filters, errors: [other | errors]}
-        end
-      end)
+  # def keyset_params_from(%{first: n} = args, opts) when is_integer(n) do
+  #   keyset_column = Keyword.get(opts, :keyset_column, :id)
+  #   display_dir = Keyword.get(opts, :display_dir, :asc)
+  #
+  #   with {:ok, filters} <- get_filters(args, display_dir) do
+  #     {:ok, {keyset_column, filters, {:asc, display_dir}, n}}
+  #   end
+  # end
+  #
+  #
+  # def keyset_params_from(%{last: n} = args, opts) when is_integer(n) do
+  #   keyset_column = Keyword.get(opts, :keyset_column, :id)
+  #   display_dir = Keyword.get(opts, :display_dir, :asc)
+  #
+  #   with {:ok, filters} <- get_filters(args, display_dir) do
+  #     {:ok, {keyset_column, filters, {:desc, display_dir}, n}}
+  #   end
+  # end
+  #
+  # def keyset_params_from(%{first: _, last: _} = args, opts) do
+  #   keyset_column = Keyword.get(opts, :keyset_column, :id)
+  #   IO.inspect(["YO DAWG", args, opts])
+  #   nil
+  # end
 
-    case filters do
-      %{filters: filters, errors: []} ->
-        {:ok, filters}
-
-      %{errors: errors} ->
-        {:error, {:invalid_filters, errors}}
+  defp parse_opts(opts) do
+    with {:ok, keyset_column} <- parse_keyset_column_opt(opts),
+         {:ok, display_dir} <- parse_display_dir_opt(opts) do
+      {:ok, {keyset_column, display_dir}}
     end
   end
+
+  defp parse_keyset_column_opt(opts) do
+    keyset_column = Keyword.get(opts, :keyset_column, :id)
+    if is_atom(keyset_column) do
+      {:ok, keyset_column}
+    else
+      {:error, {:invalid_keyset_column, keyset_column, "must be an atom"}}
+    end
+  end
+
+  defp parse_display_dir_opt(opts) do
+    display_dir = Keyword.get(opts, :display_dir, :asc)
+    if display_dir in [:asc, :desc] do
+      {:ok, display_dir}
+    else
+      {:error, {:invalid_display_dir, display_dir, "must be :asc or :desc"}}
+    end
+  end
+
+  defp get_filters([after: c], :asc), do: {:ok, [{:>, c}]}
+  defp get_filters([after: c], :desc), do: {:ok, [{:<, c}]}
+  defp get_filters([before: c], :asc), do: {:ok, [{:<, c}]}
+  defp get_filters([before: c], :desc), do: {:ok, [{:>, c}]}
+
+  # defp get_filters(args, display_dir) do
+  #   filters =
+  #     Enum.reduce(args, %{filters: [], errors: []}, fn arg, %{filters: filters, errors: errors} ->
+  #       case arg do
+  #         # handle valid filters
+  #         {:after, n} -> %{filters: [{:>, n} | filters], errors: errors}
+  #         {:before, n} -> %{filters: [{:<, n} | filters], errors: errors}
+  #         # ignore valid limits
+  #         {:first, n} -> %{filters: filters, errors: errors}
+  #         {:last, n} -> %{filters: filters, errors: errors}
+  #         # mark anything else as an error
+  #         other -> %{filters: filters, errors: [other | errors]}
+  #       end
+  #     end)
+  #
+  #   case filters do
+  #     %{filters: filters, errors: []} ->
+  #       {:ok, filters}
+  #
+  #     %{errors: errors} ->
+  #       {:error, {:invalid_filters, errors}}
+  #   end
+  # end
 
   #
   # @doc false
